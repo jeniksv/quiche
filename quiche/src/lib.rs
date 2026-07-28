@@ -420,6 +420,8 @@ use qlog::events::RawInfo;
 
 use smallvec::SmallVec;
 
+use crate::address_validation::AddressValidationTokens;
+
 use crate::buffers::DefaultBufFactory;
 
 use crate::recovery::OnAckReceivedOutcome;
@@ -441,6 +443,9 @@ pub const MAX_CONN_ID_LEN: usize = packet::MAX_CID_LEN as usize;
 
 /// The minimum length of Initial packets sent by a client.
 pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
+
+/// The maximum address validation token length supported by quiche.
+pub const MAX_ADDRESS_VALIDATION_TOKEN_LEN: usize = 1024;
 
 /// The default initial RTT.
 const DEFAULT_INITIAL_RTT: Duration = Duration::from_millis(333);
@@ -1353,6 +1358,10 @@ where
     /// client. On the server this is empty.
     session: Option<Vec<u8>>,
 
+    /// Address validation tokens queued for initial transmission or
+    /// retransmission.
+    address_validation_tokens: AddressValidationTokens,
+
     /// The configuration for recovery.
     recovery_config: recovery::RecoveryConfig,
 
@@ -2077,6 +2086,8 @@ impl<F: BufFactory> Connection<F> {
             handshake: tls,
 
             session: None,
+
+            address_validation_tokens: AddressValidationTokens::new(),
 
             recovery_config,
 
@@ -3674,6 +3685,10 @@ impl<F: BufFactory> Connection<F> {
                         self.handshake_done_acked = true;
                     },
 
+                    frame::Frame::NewToken { token } => {
+                        self.address_validation_tokens.on_packet_acked(&token);
+                    },
+
                     frame::Frame::ResetStream { stream_id, .. } => {
                         let stream = match self.streams.get_mut(stream_id) {
                             Some(v) => v,
@@ -4320,14 +4335,8 @@ impl<F: BufFactory> Connection<F> {
                         );
                     },
 
-                    // NewToken frames are never sent by quiche; they are not
-                    // implemented.
-                    frame::Frame::NewToken { .. } => {
-                        debug_panic!(
-                            "Unexpected frame lost: NewToken. quiche used to \
-                             not implement NewToken frames, retransmission of \
-                             these frames is not implemented."
-                        );
+                    frame::Frame::NewToken { token } => {
+                        self.address_validation_tokens.on_packet_lost(token);
                     },
 
                     // Data blocked frames are an optional advisory
@@ -4717,6 +4726,22 @@ impl<F: BufFactory> Connection<F> {
 
                     ack_eliciting = true;
                     in_flight = true;
+                }
+            }
+
+            // Create NEW_TOKEN frames as needed.
+            while let Some(token) = self.address_validation_tokens.next() {
+                let frame = frame::Frame::NewToken {
+                    token: token.to_vec(),
+                };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    self.address_validation_tokens.on_packet_sent();
+
+                    ack_eliciting = true;
+                    in_flight = true;
+                } else {
+                    break;
                 }
             }
 
@@ -6683,6 +6708,29 @@ impl<F: BufFactory> Connection<F> {
         MIN_CLIENT_INITIAL_LEN
     }
 
+    /// Schedules an address validation token to be sent to the peer in a
+    /// NEW_TOKEN frame.
+    ///
+    /// The connection must be a server with completed handshake and 1-RTT
+    /// write keys. The application is responsible for constructing tokens
+    /// according to RFC 9000 Sections 8.1.3 and 8.1.4.
+    ///
+    /// [`InvalidState`] is returned when called on a client or before the
+    /// handshake completes. [`InvalidFrame`] is returned for an empty or
+    /// duplicate token. [`BufferTooShort`] is returned when the token exceeds
+    /// [`MAX_ADDRESS_VALIDATION_TOKEN_LEN`].
+    ///
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    /// [`InvalidFrame`]: enum.Error.html#variant.InvalidFrame
+    /// [`BufferTooShort`]: enum.Error.html#variant.BufferTooShort
+    pub fn send_new_token(&mut self, token: &[u8]) -> Result<()> {
+        if !self.is_server || !self.handshake_completed {
+            return Err(Error::InvalidState);
+        }
+
+        self.address_validation_tokens.push(token)
+    }
+
     /// Schedule an ack-eliciting packet on the active path.
     ///
     /// QUIC packets might not contain ack-eliciting frames during normal
@@ -8192,6 +8240,7 @@ impl<F: BufFactory> Connection<F> {
         let send_path = self.paths.get(send_pid)?;
         if (self.is_established() || self.is_in_early_data()) &&
             (self.should_send_handshake_done() ||
+                self.address_validation_tokens.has_pending() ||
                 self.flow_control.should_update_max_data() ||
                 self.should_send_max_data ||
                 self.blocked_limit.is_some() ||
@@ -9497,6 +9546,7 @@ pub use crate::error::Error;
 pub use crate::error::Result;
 pub use crate::error::WireErrorCode;
 
+mod address_validation;
 mod buffers;
 mod cid;
 mod crypto;

@@ -64,6 +64,9 @@ extern "C" {
 // The minimum length of Initial packets sent by a client.
 #define QUICHE_MIN_CLIENT_INITIAL_LEN 1200
 
+// The maximum length of an address validation token.
+#define QUICHE_MAX_ADDRESS_VALIDATION_TOKEN_LEN 1024
+
 enum quiche_error {
     // There is no more work to do.
     QUICHE_ERR_DONE = -1,
@@ -391,6 +394,11 @@ typedef struct {
 // Writes a single QUIC packet to be sent to the peer.
 ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len,
                          quiche_send_info *out_info);
+
+// Writes an address validation token to be sent to the peer in a NEW_TOKEN
+// frame. token_len is limited by QUICHE_MAX_ADDRESS_VALIDATION_TOKEN_LEN.
+ssize_t quiche_conn_send_new_token(quiche_conn *conn, const uint8_t *token,
+                                   size_t token_len);
 
 // Returns the size of the send quantum, in bytes.
 size_t quiche_conn_send_quantum(const quiche_conn *conn);

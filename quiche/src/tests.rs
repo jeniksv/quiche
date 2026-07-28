@@ -363,6 +363,126 @@ fn verify_client_anonymous() {
     assert!(pipe.server.peer_cert().is_none());
 }
 
+#[test]
+fn address_validation_token_late_ack_cancels_retransmission() {
+    let mut tokens = AddressValidationTokens::new();
+
+    tokens.push(b"token").unwrap();
+    tokens.on_packet_sent();
+    tokens.on_packet_lost(b"token".to_vec());
+    assert_eq!(tokens.next(), Some(b"token".as_slice()));
+
+    tokens.on_packet_acked(b"token");
+    assert_eq!(tokens.next(), None);
+
+    tokens.on_packet_lost(b"token".to_vec());
+    assert_eq!(tokens.next(), None);
+}
+
+#[rstest]
+fn send_new_token_validates_state_and_fixed_capacity(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    assert_eq!(
+        pipe.client.send_new_token(b"token"),
+        Err(Error::InvalidState)
+    );
+    assert_eq!(
+        pipe.server.send_new_token(b"token"),
+        Err(Error::InvalidState)
+    );
+
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        pipe.server.send_new_token(b""),
+        Err(Error::InvalidFrame)
+    );
+
+    let maximum = vec![0xcd; MAX_ADDRESS_VALIDATION_TOKEN_LEN];
+    let oversized = vec![0xab; MAX_ADDRESS_VALIDATION_TOKEN_LEN + 1];
+
+    assert_eq!(
+        pipe.server.send_new_token(&oversized),
+        Err(Error::BufferTooShort)
+    );
+    assert_eq!(pipe.server.send_new_token(&maximum), Ok(()));
+    assert_eq!(
+        pipe.server.send_new_token(&maximum),
+        Err(Error::InvalidFrame)
+    );
+}
+
+#[rstest]
+fn send_new_token_stays_pending_when_current_packet_is_too_small(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let token = vec![0x42; 512];
+    assert_eq!(pipe.server.send_new_token(&token), Ok(()));
+
+    assert!(matches!(
+        pipe.server.send(&mut buf[..64]),
+        Err(Error::Done) | Err(Error::BufferTooShort)
+    ));
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+
+    assert!(frames.iter().any(|frame| {
+        matches!(
+            frame,
+            frame::Frame::NewToken { token: sent } if sent == &token
+        )
+    }));
+}
+
+#[rstest]
+fn send_new_token_is_retransmitted_before_new_tokens(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+
+    assert_eq!(pipe.handshake(), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let lost_token = b"lost token".to_vec();
+    let new_token = b"new token".to_vec();
+
+    assert_eq!(pipe.server.send_new_token(&lost_token), Ok(()));
+    let _ = pipe.server.send(&mut buf).unwrap();
+
+    test_utils::trigger_ack_based_loss(&mut pipe.server, &mut pipe.client);
+
+    assert_eq!(pipe.server.send_new_token(&new_token), Ok(()));
+
+    let (len, _) = pipe.server.send(&mut buf).unwrap();
+    let frames =
+        test_utils::decode_pkt(&mut pipe.client, &mut buf[..len]).unwrap();
+    let sent_tokens: Vec<&[u8]> = frames
+        .iter()
+        .filter_map(|frame| match frame {
+            frame::Frame::NewToken { token } => Some(token.as_slice()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        sent_tokens,
+        vec![lost_token.as_slice(), new_token.as_slice()]
+    );
+}
+
 #[rstest]
 fn missing_initial_source_connection_id(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,

@@ -891,6 +891,23 @@ pub extern "C" fn quiche_conn_send(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_send_new_token(
+    conn: &mut Connection, token: *const u8, token_len: size_t,
+) -> ssize_t {
+    if token.is_null() {
+        return Error::InvalidFrame.to_c();
+    }
+
+    let token = unsafe { slice::from_raw_parts(token, token_len) };
+
+    match conn.send_new_token(token) {
+        Ok(()) => 0,
+
+        Err(e) => e.to_c(),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_send_on_path(
     conn: &mut Connection, out: *mut u8, out_len: size_t, from: *const sockaddr,
     from_len: socklen_t, to: *const sockaddr, to_len: socklen_t,
