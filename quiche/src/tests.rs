@@ -12434,15 +12434,123 @@ fn pmtud_probe_loss_restores_recovery_mss(
 
     let _ = pipe.client.send(&mut out);
 
-    assert_eq!(
-        pipe.client
+    let active_path = pipe.client.paths.get_active().unwrap();
+    assert_eq!(active_path.recovery.max_datagram_size(), current_mtu);
+}
+
+#[rstest]
+fn pmtud_spacing_stops_idle_pto_loop(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] probe_spacing: bool,
+) {
+    let mut config = test_utils::Pipe::default_config(cc_algorithm_name).unwrap();
+    config.set_max_send_udp_payload_size(1400);
+    config.discover_pmtu(true);
+    config.set_pmtud_max_probes(u8::MAX);
+    config.set_pmtud_probe_spacing(probe_spacing);
+
+    // Only the client probes the MTU. Deliver ordinary packets and their ACKs,
+    // but drop every oversized probe. No application traffic is generated.
+    let mut pipe = test_utils::Pipe::with_client_config(&mut config).unwrap();
+    pipe.handshake().unwrap();
+    let mut dropped = 0;
+
+    for round in 0..8 {
+        for exchange in 0..32 {
+            let mut progress = false;
+            match test_utils::emit_flight(&mut pipe.client) {
+                Ok(flight) => {
+                    progress = true;
+                    for (mut packet, _) in flight {
+                        if packet.len() > 1200 {
+                            assert_eq!(packet.len(), 1400);
+                            dropped += 1;
+                        } else {
+                            pipe.server_recv(&mut packet).unwrap();
+                        }
+                    }
+                },
+                Err(e) => assert_eq!(e, Error::Done),
+            }
+
+            match test_utils::emit_flight(&mut pipe.server) {
+                Ok(flight) => {
+                    progress = true;
+                    test_utils::process_flight(&mut pipe.client, flight).unwrap();
+                },
+                Err(e) => assert_eq!(e, Error::Done),
+            }
+
+            if !progress {
+                // Loss processing can enable a probe after send() has chosen
+                // a smaller output size. Poll again to exercise that probe.
+                if !pipe
+                    .client
+                    .paths
+                    .get_active()
+                    .unwrap()
+                    .pmtud
+                    .as_ref()
+                    .unwrap()
+                    .should_probe()
+                {
+                    break;
+                }
+            }
+            assert!(exchange < 31, "packet exchange did not become idle");
+        }
+
+        let Some(deadline) = pipe
+            .client
             .paths
             .get_active()
             .unwrap()
             .recovery
-            .max_datagram_size(),
-        current_mtu,
+            .loss_detection_timer()
+        else {
+            break;
+        };
+
+        if round == 7 {
+            break;
+        }
+
+        let wait = deadline.saturating_duration_since(Instant::now());
+        assert!(wait < Duration::from_secs(1));
+        std::thread::sleep(wait + Duration::from_millis(1));
+        pipe.client.on_timeout();
+    }
+
+    assert!(dropped >= 2, "exercise retries, not only the initial probe");
+    assert!(!pipe.client.is_closed());
+    let path = pipe.client.paths.get_active().unwrap();
+    assert_eq!(
+        path.recovery.loss_detection_timer().is_none(),
+        probe_spacing
     );
+    assert_eq!(path.pmtud.as_ref().unwrap().get_pmtu(), None);
+
+    if probe_spacing {
+        assert!(!path.pmtud.as_ref().unwrap().should_probe());
+
+        // Regular traffic can resume discovery after the idle period.
+        // Deliver all packets now, including the larger MTU probe.
+        for _ in 0..32 {
+            pipe.client.send_ack_eliciting().unwrap();
+            pipe.advance().unwrap();
+        }
+        assert_eq!(
+            pipe.client
+                .paths
+                .get_active()
+                .unwrap()
+                .pmtud
+                .as_ref()
+                .unwrap()
+                .get_pmtu(),
+            Some(1400)
+        );
+    }
 }
 
 #[rstest]
@@ -12649,6 +12757,8 @@ fn pmtud_probe_retry_after_loss(
 #[rstest]
 fn enable_pmtud_mid_handshake(
     #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+    #[values(false, true)] probe_spacing: bool,
+    #[values(false, true)] initially_enabled: bool,
 ) {
     // Manually construct `SslContextBuilder` for the server so we can enable
     // PMTUD during the handshake.
@@ -12677,6 +12787,8 @@ fn enable_pmtud_mid_handshake(
         server_config.set_cc_algorithm_name(cc_algorithm_name),
         Ok(())
     );
+    server_config.set_pmtud_probe_spacing(probe_spacing);
+    server_config.discover_pmtu(initially_enabled);
 
     let mut client_config = Config::new(PROTOCOL_VERSION).unwrap();
     client_config
@@ -12709,7 +12821,7 @@ fn enable_pmtud_mid_handshake(
     .unwrap();
 
     let active_path = pipe.server.paths.get_active_mut().unwrap();
-    assert!(active_path.pmtud.is_none());
+    assert_eq!(active_path.pmtud.is_some(), initially_enabled);
 
     assert_eq!(pipe.handshake(), Ok(()));
 
@@ -12717,15 +12829,20 @@ fn enable_pmtud_mid_handshake(
     assert!(active_path.pmtud.is_some());
     assert_eq!(active_path.pmtud.as_mut().unwrap().get_current_mtu(), 1200);
 
-    let path_stats = pipe.server.path_stats().next().unwrap();
-    assert_eq!(
-        pipe.server.path_event_next(),
-        Some(PathEvent::PmtuUpdated {
-            local: path_stats.local_addr,
-            peer: path_stats.peer_addr,
-            pmtu: MIN_CLIENT_INITIAL_LEN,
-        })
-    );
+    // Enabling PMTUD mid-handshake lowers the path MTU to the fallback and
+    // emits an event. When PMTUD was already enabled from the start, that
+    // transition happened during the handshake, so no event is pending here.
+    if !initially_enabled {
+        let path_stats = pipe.server.path_stats().next().unwrap();
+        assert_eq!(
+            pipe.server.path_event_next(),
+            Some(PathEvent::PmtuUpdated {
+                local: path_stats.local_addr,
+                peer: path_stats.peer_addr,
+                pmtu: MIN_CLIENT_INITIAL_LEN,
+            })
+        );
+    }
     assert_eq!(pipe.server.path_event_next(), None);
 
     assert_eq!(pipe.advance(), Ok(()));
@@ -12752,6 +12869,21 @@ fn enable_pmtud_mid_handshake(
         })
     );
     assert_eq!(pipe.server.path_event_next(), None);
+
+    // The callback changes enable/max_probes, not the configured spacing.
+    // Check the effective policy through the next probe's eligibility.
+    let pmtud = pipe
+        .server
+        .paths
+        .get_active_mut()
+        .unwrap()
+        .pmtud
+        .as_mut()
+        .unwrap();
+    pmtud.revalidate_pmtu();
+    pmtud.set_in_flight(true);
+    pmtud.failed_probe(1350);
+    assert_eq!(pmtud.should_probe(), !probe_spacing);
 }
 
 #[cfg(feature = "boringssl-boring-crate")]
