@@ -4076,7 +4076,7 @@ impl<F: BufFactory> Connection<F> {
 
         let send_path = self.paths.get_mut(send_pid)?;
 
-        // Update max datagram size to allow path MTU discovery probe to be sent.
+        // Increase output size to allow path MTU discovery probe to be sent.
         if let Some(pmtud) = send_path.pmtud.as_mut() {
             if pmtud.should_probe() {
                 let size = if self.handshake_confirmed || self.handshake_completed
@@ -4086,10 +4086,7 @@ impl<F: BufFactory> Connection<F> {
                     pmtud.get_current_mtu()
                 };
 
-                send_path.recovery.pmtud_update_max_datagram_size(size);
-
-                left =
-                    cmp::min(out.len(), send_path.recovery.max_datagram_size());
+                left = cmp::min(out.len(), size);
             }
         }
 
@@ -4368,6 +4365,9 @@ impl<F: BufFactory> Connection<F> {
                             if let Some(pmtud) = p.pmtud.as_mut() {
                                 trace!("pmtud probe dropped: {failed_probe}");
                                 pmtud.failed_probe(failed_probe);
+                                p.recovery.pmtud_update_max_datagram_size(
+                                    pmtud.get_current_mtu(),
+                                );
                             }
                         }
                     },
@@ -8100,7 +8100,7 @@ impl<F: BufFactory> Connection<F> {
                     .pmtud
                     .as_mut()
                     .expect("PMTUD existence verified above")
-                    .get_probe_size()
+                    .get_current_mtu()
                     .min(peer_params.max_udp_payload_size as usize),
             );
         } else {
