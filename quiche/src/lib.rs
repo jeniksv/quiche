@@ -366,6 +366,8 @@
 //!
 //! * `ffi`: Build and expose the FFI API.
 //!
+//! * `control-events`: Expose connection-level control events.
+//!
 //! * `qlog`: Enable support for the [qlog] logging format.
 //!
 //! * `custom-client-dcid`: Allow clients to supply a custom DCID when
@@ -1311,6 +1313,20 @@ impl StreamsBlockedState {
     }
 }
 
+/// A connection-level control event generated while processing peer input.
+#[allow(missing_docs)]
+#[cfg(feature = "control-events")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlEvent {
+    ResetStream {
+        stream_id: u64,
+    },
+
+    StopSending {
+        stream_id: u64,
+    },
+}
+
 /// A QUIC connection.
 pub struct Connection<F = DefaultBufFactory>
 where
@@ -1446,6 +1462,10 @@ where
 
     /// Streams map, indexed by stream ID.
     pub(crate) streams: stream::StreamMap<F>,
+
+    /// Pending control events generated while processing peer frames.
+    #[cfg(feature = "control-events")]
+    control_events: VecDeque<ControlEvent>,
 
     /// Peer's original destination connection ID. Used by the client to
     /// validate the server's transport parameter.
@@ -2134,6 +2154,9 @@ impl<F: BufFactory> Connection<F> {
                 config.local_transport_params.initial_max_streams_uni,
                 config.max_stream_window,
             ),
+
+            #[cfg(feature = "control-events")]
+            control_events: VecDeque::new(),
 
             odcid: None,
 
@@ -7466,6 +7489,17 @@ impl<F: BufFactory> Connection<F> {
         Ok(())
     }
 
+    /// Returns the next pending connection-level control event.
+    ///
+    /// On success it returns a [`ControlEvent`], or `None` when there are no
+    /// events to report.
+    ///
+    /// [`ControlEvent`]: enum.ControlEvent.html
+    #[cfg(feature = "control-events")]
+    pub fn control_event_next(&mut self) -> Option<ControlEvent> {
+        self.control_events.pop_front()
+    }
+
     /// Processes path-specific events.
     ///
     /// On success it returns a [`PathEvent`], or `None` when there are no
@@ -8464,6 +8498,10 @@ impl<F: BufFactory> Connection<F> {
                 if !was_reset {
                     self.reset_stream_remote_count =
                         self.reset_stream_remote_count.saturating_add(1);
+
+                    #[cfg(feature = "control-events")]
+                    self.control_events
+                        .push_back(ControlEvent::ResetStream { stream_id });
                 }
             },
 
@@ -8552,6 +8590,10 @@ impl<F: BufFactory> Connection<F> {
                         self.stopped_stream_remote_count.saturating_add(1);
                     self.reset_stream_local_count =
                         self.reset_stream_local_count.saturating_add(1);
+
+                    #[cfg(feature = "control-events")]
+                    self.control_events
+                        .push_back(ControlEvent::StopSending { stream_id });
                 }
             },
 
