@@ -255,6 +255,13 @@ pub extern "C" fn quiche_config_set_max_amplification_factor(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_send_capacity_factor(
+    config: &mut Config, v: f64,
+) {
+    config.set_send_capacity_factor(v);
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_set_max_idle_timeout(
     config: &mut Config, v: u64,
 ) {
