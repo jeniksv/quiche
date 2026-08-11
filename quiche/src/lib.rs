@@ -6575,6 +6575,29 @@ impl<F: BufFactory> Connection<F> {
         }
     }
 
+    /// Returns true if the send-side of the specified stream is finished.
+    ///
+    /// This happens when the stream's send-side final size is known,
+    /// either because the application set the `fin` flag on the stream,
+    /// or because the send-side was shut down (locally, or in response
+    /// to the peer's `STOP_SENDING`).
+    #[inline]
+    pub fn stream_send_finished(&self, stream_id: u64) -> bool {
+        let stream = match self.streams.get(stream_id) {
+            Some(v) => v,
+
+            None => return true,
+        };
+
+        stream.send.is_fin()
+    }
+
+    /// Returns true if the stream has been collected.
+    #[inline]
+    pub fn stream_is_collected(&self, stream_id: u64) -> bool {
+        self.streams.is_collected(stream_id)
+    }
+
     /// Returns the number of bidirectional streams that can be created
     /// before the peer's stream count limit is reached.
     ///
