@@ -488,6 +488,10 @@ int64_t quiche_conn_stream_writable_next(quiche_conn *conn);
 // Returns true if all the data has been read from the specified stream.
 bool quiche_conn_stream_finished(const quiche_conn *conn, uint64_t stream_id);
 
+// Returns true if the send-side of the stream is finished (fin was sent or
+// the send-side was shut down).
+bool quiche_conn_stream_send_finished(const quiche_conn *conn, uint64_t stream_id);
+
 typedef struct quiche_stream_iter quiche_stream_iter;
 
 enum quiche_control_event_type {
