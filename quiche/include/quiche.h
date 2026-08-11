@@ -400,6 +400,19 @@ ssize_t quiche_conn_send(quiche_conn *conn, uint8_t *out, size_t out_len,
 ssize_t quiche_conn_send_new_token(quiche_conn *conn, const uint8_t *token,
                                    size_t token_len);
 
+// Returns the maximum pacing release-ahead window, in nanoseconds.
+// Equals 1/8 of the smoothed RTT, clamped to [1ms, 5ms].
+uint64_t quiche_conn_max_release_into_future_as_nanos(const quiche_conn *conn);
+
+// Writes the release time for the next packet into `out`.
+//
+// Returns false when pacing is disabled, when the next packet can be sent
+// immediately, or when there is no active path. In those cases `out` is set
+// to zero. Returns true when `out` contains an absolute CLOCK_MONOTONIC
+// timestamp for a future release.
+bool quiche_conn_next_release_time(const quiche_conn *conn,
+                                   struct timespec *out);
+
 // Returns the size of the send quantum, in bytes.
 size_t quiche_conn_send_quantum(const quiche_conn *conn);
 

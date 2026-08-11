@@ -1669,6 +1669,31 @@ pub extern "C" fn quiche_conn_peer_streams_left_uni(conn: &Connection) -> u64 {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_max_release_into_future_as_nanos(
+    conn: &Connection,
+) -> u64 {
+    conn.max_release_into_future().as_nanos() as u64
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_conn_next_release_time(
+    conn: &Connection, out: &mut timespec,
+) -> bool {
+    match conn.get_next_release_time().and_then(|d| d.time(Instant::now())) {
+        Some(t) => {
+            std_time_to_c(&t, out);
+            true
+        },
+
+        None => {
+            out.tv_sec = 0;
+            out.tv_nsec = 0;
+            false
+        },
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_send_quantum(conn: &Connection) -> size_t {
     conn.send_quantum() as size_t
 }
