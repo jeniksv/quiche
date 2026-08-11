@@ -49,6 +49,9 @@ fuzzing = []
 # Build and expose the FFI API.
 ffi = ["dep:cdylib-link-lines"]
 
+# Expose connection-level control events.
+control-events = []
+
 # Exposes internal APIs that have no stability guarantees across versions.
 internal = []
 

@@ -491,11 +491,35 @@ bool quiche_conn_stream_is_collected(const quiche_conn *conn, uint64_t stream_id
 
 typedef struct quiche_stream_iter quiche_stream_iter;
 
+enum quiche_control_event_type {
+    QUICHE_CONTROL_EVENT_RESET_STREAM = 1,
+    QUICHE_CONTROL_EVENT_STOP_SENDING = 2,
+};
+
+typedef struct {
+    uint64_t stream_id;
+} quiche_control_event_stream;
+
+typedef union {
+    // Active for PEER_RESET and PEER_STOP_SENDING.
+    quiche_control_event_stream stream;
+} quiche_control_event_data;
+
+typedef struct {
+    uint32_t type;
+    quiche_control_event_data data;
+} quiche_control_event;
+
 // Returns an iterator over streams that have outstanding data to read.
 quiche_stream_iter *quiche_conn_readable(const quiche_conn *conn);
 
 // Returns an iterator over streams that can be written to.
 quiche_stream_iter *quiche_conn_writable(const quiche_conn *conn);
+
+// Writes the next pending control event to `out` and returns true. Returns
+// false when there are no pending control events or when `out` is NULL.
+bool quiche_conn_control_event_next(quiche_conn *conn,
+                                    quiche_control_event *out);
 
 // Returns the maximum possible size of egress UDP payloads.
 size_t quiche_conn_max_send_udp_payload_size(const quiche_conn *conn);

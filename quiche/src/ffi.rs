@@ -1095,6 +1095,67 @@ pub extern "C" fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
     Box::into_raw(Box::new(conn.writable()))
 }
 
+#[cfg(feature = "control-events")]
+#[repr(u32)]
+enum ControlEventType {
+    PeerReset = 1,
+    PeerStopSending = 2,
+}
+
+#[cfg(feature = "control-events")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ControlEventStream {
+    stream_id: u64,
+}
+
+#[cfg(feature = "control-events")]
+#[repr(C)]
+pub union ControlEventData {
+    stream: ControlEventStream,
+}
+
+#[cfg(feature = "control-events")]
+#[repr(C)]
+pub struct ControlEventFFI {
+    event_type: u32,
+    data: ControlEventData,
+}
+
+#[cfg(feature = "control-events")]
+#[no_mangle]
+pub extern "C" fn quiche_conn_control_event_next(
+    conn: &mut Connection, out: *mut ControlEventFFI,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+
+    let Some(event) = conn.control_event_next() else {
+        return false;
+    };
+
+    let event = match event {
+        ControlEvent::ResetStream { stream_id } => ControlEventFFI {
+            event_type: ControlEventType::PeerReset as u32,
+            data: ControlEventData {
+                stream: ControlEventStream { stream_id },
+            },
+        },
+
+        ControlEvent::StopSending { stream_id } => ControlEventFFI {
+            event_type: ControlEventType::PeerStopSending as u32,
+            data: ControlEventData {
+                stream: ControlEventStream { stream_id },
+            },
+        },
+    };
+
+    unsafe { ptr::write(out, event) };
+
+    true
+}
+
 #[no_mangle]
 pub extern "C" fn quiche_conn_max_send_udp_payload_size(
     conn: &Connection,
