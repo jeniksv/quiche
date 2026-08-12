@@ -10797,7 +10797,18 @@ fn path_validation_limited_mtu(
         .path_id_from_addrs(&(client_addr_2, server_addr))
         .unwrap();
     assert!(!pipe.client.paths.get(probed_pid).unwrap().validated(),);
+    assert!(pipe.client.paths.get(probed_pid).unwrap().reachable());
     assert_eq!(pipe.client.path_event_next(), None);
+
+    #[cfg(feature = "control-events")]
+    assert_eq!(
+        pipe.client.control_event_next(),
+        Some(ControlEvent::AddressReachable {
+            local_addr: client_addr_2,
+            peer_addr: server_addr,
+        })
+    );
+
     // Now let the client probe at its MTU.
     assert_eq!(pipe.advance(), Ok(()));
     assert!(pipe.client.paths.get(probed_pid).unwrap().validated());
@@ -10805,6 +10816,9 @@ fn path_validation_limited_mtu(
         pipe.client.path_event_next(),
         Some(PathEvent::Validated(client_addr_2, server_addr))
     );
+
+    #[cfg(feature = "control-events")]
+    assert_eq!(pipe.client.control_event_next(), None);
 }
 
 #[rstest]
