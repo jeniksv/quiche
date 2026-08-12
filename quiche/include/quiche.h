@@ -494,15 +494,26 @@ typedef struct quiche_stream_iter quiche_stream_iter;
 enum quiche_control_event_type {
     QUICHE_CONTROL_EVENT_RESET_STREAM = 1,
     QUICHE_CONTROL_EVENT_STOP_SENDING = 2,
+    QUICHE_CONTROL_EVENT_ADDRESS_REACHABLE = 3,
 };
 
 typedef struct {
     uint64_t stream_id;
 } quiche_control_event_stream;
 
+typedef struct {
+    struct sockaddr_storage local;
+    socklen_t local_len;
+    struct sockaddr_storage peer;
+    socklen_t peer_len;
+} quiche_control_event_addr;
+
 typedef union {
     // Active for PEER_RESET and PEER_STOP_SENDING.
     quiche_control_event_stream stream;
+
+    // Active for PEER_ADDR_VALIDATED.
+    quiche_control_event_addr addr;
 } quiche_control_event_data;
 
 typedef struct {

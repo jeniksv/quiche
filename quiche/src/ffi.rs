@@ -1100,6 +1100,7 @@ pub extern "C" fn quiche_conn_writable(conn: &Connection) -> *mut StreamIter {
 enum ControlEventType {
     PeerReset = 1,
     PeerStopSending = 2,
+    PeerAddrValidated = 3,
 }
 
 #[cfg(feature = "control-events")]
@@ -1111,8 +1112,19 @@ pub struct ControlEventStream {
 
 #[cfg(feature = "control-events")]
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ControlEventAddr {
+    local: sockaddr_storage,
+    local_len: socklen_t,
+    peer: sockaddr_storage,
+    peer_len: socklen_t,
+}
+
+#[cfg(feature = "control-events")]
+#[repr(C)]
 pub union ControlEventData {
     stream: ControlEventStream,
+    addr: ControlEventAddr,
 }
 
 #[cfg(feature = "control-events")]
@@ -1148,6 +1160,28 @@ pub extern "C" fn quiche_conn_control_event_next(
             data: ControlEventData {
                 stream: ControlEventStream { stream_id },
             },
+        },
+
+        ControlEvent::AddressReachable {
+            local_addr,
+            peer_addr,
+        } => {
+            let mut local = unsafe { std::mem::zeroed() };
+            let mut peer = unsafe { std::mem::zeroed() };
+            let local_len = std_addr_to_c(&local_addr, &mut local);
+            let peer_len = std_addr_to_c(&peer_addr, &mut peer);
+
+            ControlEventFFI {
+                event_type: ControlEventType::PeerAddrValidated as u32,
+                data: ControlEventData {
+                    addr: ControlEventAddr {
+                        local,
+                        local_len,
+                        peer,
+                        peer_len,
+                    },
+                },
+            }
         },
     };
 

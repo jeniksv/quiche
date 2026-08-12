@@ -1325,6 +1325,12 @@ pub enum ControlEvent {
     StopSending {
         stream_id: u64,
     },
+
+    AddressReachable {
+        local_addr: SocketAddr,
+
+        peer_addr: SocketAddr,
+    },
 }
 
 /// A QUIC connection.
@@ -2156,7 +2162,18 @@ impl<F: BufFactory> Connection<F> {
             ),
 
             #[cfg(feature = "control-events")]
-            control_events: VecDeque::new(),
+            control_events: {
+                let mut events = VecDeque::new();
+
+                if is_server && retry_cids.is_some() {
+                    events.push_back(ControlEvent::AddressReachable {
+                        local_addr: local,
+                        peer_addr: peer,
+                    });
+                }
+
+                events
+            },
 
             odcid: None,
 
@@ -3835,7 +3852,24 @@ impl<F: BufFactory> Connection<F> {
         if self.is_server && hdr.ty == Type::Handshake {
             self.drop_epoch_state(packet::Epoch::Initial, now);
 
+            #[cfg(feature = "control-events")]
+            let peer_addr_validated = {
+                let path = self.paths.get(recv_pid)?;
+
+                (!path.verified_peer_address)
+                    .then_some((path.local_addr(), path.peer_addr()))
+            };
+
             self.paths.get_mut(recv_pid)?.verified_peer_address = true;
+
+            #[cfg(feature = "control-events")]
+            if let Some((local_addr, peer_addr)) = peer_addr_validated {
+                self.control_events
+                    .push_back(ControlEvent::AddressReachable {
+                        local_addr,
+                        peer_addr,
+                    });
+            }
         }
 
         self.ack_eliciting_sent = false;
@@ -8866,7 +8900,25 @@ impl<F: BufFactory> Connection<F> {
             },
 
             frame::Frame::PathResponse { data } => {
+                #[cfg(feature = "control-events")]
+                let was_reachable =
+                    self.paths.get(recv_path_id)?.reachable();
+
                 self.paths.on_response_received(data)?;
+
+                #[cfg(feature = "control-events")]
+                if !was_reachable {
+                    let path = self.paths.get(recv_path_id)?;
+
+                    if path.reachable() {
+                        self.control_events.push_back(
+                            ControlEvent::AddressReachable {
+                                local_addr: path.local_addr(),
+                                peer_addr: path.peer_addr(),
+                            },
+                        );
+                    }
+                }
             },
 
             frame::Frame::ConnectionClose {
