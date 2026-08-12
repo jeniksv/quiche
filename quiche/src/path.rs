@@ -401,6 +401,13 @@ impl Path {
         matches!(self.state, PathState::Validating | PathState::ValidatingMTU)
     }
 
+    /// Returns whether this path is reachable.
+    #[inline]
+    #[cfg(any(feature = "control-events", test))]
+    pub fn reachable(&self) -> bool {
+        matches!(self.state, PathState::ValidatingMTU | PathState::Validated)
+    }
+
     /// Requests path validation.
     #[inline]
     pub fn request_validation(&mut self) {
