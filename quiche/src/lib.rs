@@ -8655,6 +8655,8 @@ impl<F: BufFactory> Connection<F> {
                 let was_readable = stream.is_readable();
                 let priority_key = Arc::clone(&stream.priority_key);
 
+                let was_reset = stream.recv.is_reset();
+
                 let stream::RecvBufResetReturn {
                     max_data_delta,
                     consumed_flowcontrol,
@@ -8678,8 +8680,10 @@ impl<F: BufFactory> Connection<F> {
                 // flow-control
                 self.flow_control.add_consumed(consumed_flowcontrol);
 
-                self.reset_stream_remote_count =
-                    self.reset_stream_remote_count.saturating_add(1);
+                if !was_reset {
+                    self.reset_stream_remote_count =
+                        self.reset_stream_remote_count.saturating_add(1);
+                }
 
                 if state == stream::StreamState::Collectable {
                     self.streams.collect(stream_id, local);
