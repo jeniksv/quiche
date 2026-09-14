@@ -582,7 +582,9 @@ pub enum VantagePointType {
 #[serde(rename_all = "snake_case")]
 pub enum TimeFormat {
     #[default]
+    #[serde(alias = "absolute", alias = "relative")]
     RelativeToEpoch,
+    #[serde(alias = "delta")]
     RelativeToPreviousEvent,
 }
 
@@ -682,6 +684,31 @@ mod tests {
     use std::time::UNIX_EPOCH;
 
     use super::ReferenceTime;
+    use super::TimeFormat;
+
+    #[test]
+    fn time_format_accepts_legacy_names() {
+        for value in ["absolute", "relative", "relative_to_epoch"] {
+            let time_format: TimeFormat =
+                serde_json::from_str(&format!("\"{value}\"")).unwrap();
+            assert_eq!(time_format, TimeFormat::RelativeToEpoch);
+        }
+
+        for value in ["delta", "relative_to_previous_event"] {
+            let time_format: TimeFormat =
+                serde_json::from_str(&format!("\"{value}\"")).unwrap();
+            assert_eq!(time_format, TimeFormat::RelativeToPreviousEvent);
+        }
+
+        assert_eq!(
+            serde_json::to_string(&TimeFormat::RelativeToEpoch).unwrap(),
+            "\"relative_to_epoch\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TimeFormat::RelativeToPreviousEvent).unwrap(),
+            "\"relative_to_previous_event\""
+        );
+    }
 
     #[test]
     fn reference_time_new_monotonic_serialization() {

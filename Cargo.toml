@@ -7,6 +7,7 @@ members = [
   "netlog",
   "octets",
   "qlog",
+  "qlog-analyzer",
   "qlog-dancer",
   "quiche",
   "task-killswitch",

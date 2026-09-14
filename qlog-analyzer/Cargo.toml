@@ -1,0 +1,25 @@
+[package]
+name = "qlog-analyzer"
+version = "0.1.0"
+description = "Batch analysis and outlier detection for qlog traces"
+repository = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+readme = "README.md"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+qlog = { workspace = true, features = ["gzip", "zstd"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
