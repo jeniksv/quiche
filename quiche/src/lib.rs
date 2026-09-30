@@ -589,6 +589,8 @@ pub struct Config {
 
     tx_cap_factor: f64,
 
+    tx_cap_cwnd_limit: bool,
+
     dgram_recv_max_queue_len: usize,
     dgram_send_max_queue_len: usize,
 
@@ -667,6 +669,8 @@ impl Config {
             max_pacing_rate: None,
 
             tx_cap_factor: TX_CAP_FACTOR,
+
+            tx_cap_cwnd_limit: true,
 
             dgram_recv_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
             dgram_send_max_queue_len: DEFAULT_MAX_DGRAM_QUEUE_LEN,
@@ -915,6 +919,18 @@ impl Config {
     /// The default value is `1`.
     pub fn set_send_capacity_factor(&mut self, v: f64) {
         self.tx_cap_factor = v;
+    }
+
+    /// Sets whether stream buffering is limited by the congestion window.
+    ///
+    /// The default is `true`. When `false`, application writes are limited
+    /// only by connection and stream flow control, and the send capacity
+    /// factor is ignored. Congestion control still limits packet transmission.
+    ///
+    /// Disabling this limit can increase send-buffer memory usage up to the
+    /// flow-control credit advertised by the peer.
+    pub fn set_send_capacity_cwnd_limit(&mut self, v: bool) {
+        self.tx_cap_cwnd_limit = v;
     }
 
     /// Sets the connection's initial RTT.
@@ -1435,6 +1451,9 @@ where
 
     /// PMTUD spacing policy, including when discovery is enabled in TLS.
     pmtud_pkts_between_probes: usize,
+
+    /// Whether stream buffering is limited by the congestion window.
+    tx_cap_cwnd_limit: bool,
 
     /// Total number of bytes sent to the peer.
     tx_data: u64,
@@ -2136,6 +2155,7 @@ impl<F: BufFactory> Connection<F> {
 
             tx_cap: 0,
             tx_cap_factor: config.tx_cap_factor,
+            tx_cap_cwnd_limit: config.tx_cap_cwnd_limit,
 
             pmtud_pkts_between_probes: config.pmtud_pkts_between_probes,
 
@@ -9014,6 +9034,13 @@ impl<F: BufFactory> Connection<F> {
 
     /// Updates send capacity.
     fn update_tx_cap(&mut self) {
+        if !self.tx_cap_cwnd_limit {
+            self.tx_cap =
+                cmp::min(self.max_tx_data - self.tx_data, usize::MAX as u64)
+                    as usize;
+            return;
+        }
+
         let (cwin, cwin_available) = match self.paths.get_active() {
             Ok(p) => (p.recovery.cwnd(), p.recovery.cwnd_available()),
             Err(_) => (0, 0),
