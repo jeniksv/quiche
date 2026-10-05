@@ -2319,6 +2319,8 @@ impl<F: BufFactory> Connection<F> {
     #[inline]
     pub fn set_keylog(&mut self, writer: Box<dyn std::io::Write + Send + Sync>) {
         self.keylog = Some(writer);
+
+        self.handshake.enable_keylog();
     }
 
     /// Sets qlog output to the designated [`Writer`].
