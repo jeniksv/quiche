@@ -393,6 +393,13 @@ impl Handshake {
         unsafe { SSL_get_error(self.as_ptr(), ret_code) }
     }
 
+    pub fn enable_keylog(&mut self) {
+        unsafe {
+            let ctx = SSL_get_SSL_CTX(self.as_mut_ptr());
+            SSL_CTX_set_keylog_callback(ctx, Some(keylog));
+        }
+    }
+
     pub fn init(&mut self, is_server: bool) -> Result<()> {
         self.set_state(is_server);
 
