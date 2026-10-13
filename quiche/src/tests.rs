@@ -497,10 +497,10 @@ fn send_new_token_is_retransmitted_before_new_tokens(
         })
         .collect();
 
-    assert_eq!(
-        sent_tokens,
-        vec![lost_token.as_slice(), new_token.as_slice()]
-    );
+    assert_eq!(sent_tokens, vec![
+        lost_token.as_slice(),
+        new_token.as_slice()
+    ]);
 }
 
 #[rstest]
