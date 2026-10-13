@@ -420,10 +420,7 @@ fn send_new_token_validates_state_and_fixed_capacity(
     assert_eq!(pipe.handshake(), Ok(()));
     assert_eq!(pipe.advance(), Ok(()));
 
-    assert_eq!(
-        pipe.server.send_new_token(b""),
-        Err(Error::InvalidFrame)
-    );
+    assert_eq!(pipe.server.send_new_token(b""), Err(Error::InvalidFrame));
 
     let maximum = vec![0xcd; MAX_ADDRESS_VALIDATION_TOKEN_LEN];
     let oversized = vec![0xab; MAX_ADDRESS_VALIDATION_TOKEN_LEN + 1];
