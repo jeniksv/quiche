@@ -9032,8 +9032,7 @@ impl<F: BufFactory> Connection<F> {
 
             frame::Frame::PathResponse { data } => {
                 #[cfg(feature = "control-events")]
-                let was_reachable =
-                    self.paths.get(recv_path_id)?.reachable();
+                let was_reachable = self.paths.get(recv_path_id)?.reachable();
 
                 self.paths.on_response_received(data)?;
 
