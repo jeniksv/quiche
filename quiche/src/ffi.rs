@@ -1823,7 +1823,10 @@ pub extern "C" fn quiche_conn_max_release_into_future_as_nanos(
 pub extern "C" fn quiche_conn_next_release_time(
     conn: &Connection, out: &mut timespec,
 ) -> bool {
-    match conn.get_next_release_time().and_then(|d| d.time(Instant::now())) {
+    match conn.
+        get_next_release_time().
+        and_then(|d| d.time(Instant::now()))
+    {
         Some(t) => {
             std_time_to_c(&t, out);
             true
