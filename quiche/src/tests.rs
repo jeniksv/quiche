@@ -1478,6 +1478,42 @@ fn stream_complete_after_read_shutdown_and_reset(
     assert_eq!(pipe.server.stream_readable_next(), None);
 }
 
+#[rstest]
+/// Tests that stream_reset() reports a reset without consuming data.
+fn stream_reset(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert!(!pipe.server.stream_reset(0));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(!pipe.server.stream_reset(0));
+
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 0,
+        error_code: 42,
+        final_size: 5,
+    }];
+
+    let pkt_type = Type::Short;
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+
+    assert!(pipe.server.stream_reset(0));
+    assert!(pipe.server.stream_reset(0));
+
+    // The reset is still reported to the reader.
+    assert_eq!(
+        pipe.server.stream_recv(0, &mut buf),
+        Err(Error::StreamReset(42))
+    );
+}
+
 /// Test receiving into `BufMut`
 #[rstest]
 fn stream_recv_buf(

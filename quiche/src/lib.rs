@@ -6714,6 +6714,26 @@ impl<F: BufFactory> Connection<F> {
         stream.send.is_fin()
     }
 
+    /// Returns true if the peer reset the specified stream (`RESET_STREAM`).
+    ///
+    /// Unlike [`stream_recv()`], which reports the reset as an error, this
+    /// doesn't consume any buffered data, so it can be used to check a stream
+    /// returned by [`stream_readable_next()`] before handing it over to code
+    /// that reads the stream on its own schedule.
+    ///
+    /// Returns false if the stream doesn't exist.
+    ///
+    /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
+    /// [`stream_readable_next()`]: struct.Connection.html#method.stream_readable_next
+    #[inline]
+    pub fn stream_reset(&self, stream_id: u64) -> bool {
+        match self.streams.get(stream_id) {
+            Some(stream) => stream.recv.is_reset(),
+
+            None => false,
+        }
+    }
+
     /// Returns true if the specified stream is complete.
     ///
     /// For bidirectional streams this happens when all incoming data has been

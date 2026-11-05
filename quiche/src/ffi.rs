@@ -1114,6 +1114,13 @@ pub extern "C" fn quiche_conn_stream_send_finished(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_stream_reset(
+    conn: &Connection, stream_id: u64,
+) -> bool {
+    conn.stream_reset(stream_id)
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_stream_complete(
     conn: &Connection, stream_id: u64,
 ) -> bool {
