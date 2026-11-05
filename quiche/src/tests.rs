@@ -1301,6 +1301,103 @@ fn stream_readable_next_reset_after_fin(
     assert_eq!(pipe.server.stream_readable_next(), None);
 }
 
+#[rstest]
+/// Tests that a new STOP_SENDING is reported by stream_writable_next(), even if
+/// the stream was returned already and nothing was written to it.
+fn stream_writable_next_stop_unwritten(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server takes the writable notification, but doesn't write anything.
+    while pipe.server.stream_writable_next().is_some() {}
+
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    // The stop is reported although the stream was writable already.
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+    assert_eq!(pipe.server.stream_writable_next(), None);
+
+    assert_eq!(
+        pipe.server.stream_send(0, b"world", true),
+        Err(Error::StreamStopped(42))
+    );
+
+    // A retransmitted STOP_SENDING is not reported again.
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+    assert_eq!(pipe.server.stream_writable_next(), None);
+}
+
+#[rstest]
+/// Tests that stream_writable_next() reports a stream stopped by the peer
+/// without connection-level send capacity.
+fn stream_writable_next_stop_without_capacity(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.set_initial_max_data(30);
+    config.set_initial_max_stream_data_bidi_local(1000);
+    config.set_initial_max_stream_data_bidi_remote(1000);
+    config.set_initial_max_streams_bidi(3);
+    config.verify_peer(false);
+
+    let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"a", true), Ok(1));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server uses up the connection send capacity, all of it is sent.
+    assert_eq!(pipe.server.stream_send(0, &[0; 30], false), Ok(30));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert_eq!(pipe.server.tx_cap, 0);
+
+    while pipe.server.stream_writable_next().is_some() {}
+
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    // Nothing was left unsent, so there is still no send capacity, but the
+    // stopped stream is reported.
+    assert_eq!(pipe.server.tx_cap, 0);
+    assert_eq!(pipe.server.stream_writable_next(), Some(0));
+    assert_eq!(pipe.server.stream_writable_next(), None);
+
+    assert_eq!(
+        pipe.server.stream_send(0, b"a", false),
+        Err(Error::StreamStopped(42))
+    );
+}
+
 /// Test receiving into `BufMut`
 #[rstest]
 fn stream_recv_buf(

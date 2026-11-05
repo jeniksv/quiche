@@ -6533,6 +6533,9 @@ impl<F: BufFactory> Connection<F> {
 
     /// Returns the next stream that can be written to.
     ///
+    /// A stream stopped by the peer is returned regardless of the send
+    /// capacity.
+    ///
     /// Note that once returned by this method, a stream ID will not be returned
     /// again until it is "re-armed".
     ///
@@ -6547,12 +6550,8 @@ impl<F: BufFactory> Connection<F> {
     /// [`stream_writable()`]: struct.Connection.html#method.stream_writable
     /// [`writable()`]: struct.Connection.html#method.writable
     pub fn stream_writable_next(&mut self) -> Option<u64> {
-        // If there is not enough connection-level send capacity, none of the
-        // streams are writable.
-        if self.tx_cap == 0 {
-            return None;
-        }
-
+        // Without connection-level send capacity none of the streams is
+        // writable, but stopped streams are still returned below.
         let mut cursor = self.streams.writable.front();
 
         while let Some(priority_key) = cursor.clone_pointer() {
@@ -8620,8 +8619,6 @@ impl<F: BufFactory> Connection<F> {
                     Err(e) => return Err(e),
                 };
 
-                let was_writable = stream.is_writable();
-
                 let priority_key = Arc::clone(&stream.priority_key);
 
                 // Save the buffered length before stopping (stop clears the
@@ -8666,9 +8663,11 @@ impl<F: BufFactory> Connection<F> {
 
                     self.streams.insert_reset(stream_id, error_code, final_size);
 
-                    if !was_writable {
-                        self.streams.insert_writable(&priority_key);
-                    }
+                    // Report the stop even if the stream was writable already:
+                    // the application might have taken it from
+                    // stream_writable_next() without writing to it, and would
+                    // not learn about the stop otherwise.
+                    self.streams.insert_writable(&priority_key);
 
                     self.stopped_stream_remote_count =
                         self.stopped_stream_remote_count.saturating_add(1);
