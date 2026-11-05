@@ -489,6 +489,11 @@ bool quiche_conn_stream_finished(const quiche_conn *conn, uint64_t stream_id);
 // the send-side was shut down).
 bool quiche_conn_stream_send_finished(const quiche_conn *conn, uint64_t stream_id);
 
+// Returns true if the peer reset the stream (RESET_STREAM). Unlike
+// quiche_conn_stream_recv() it doesn't consume any data. Returns false if the
+// stream doesn't exist.
+bool quiche_conn_stream_reset(const quiche_conn *conn, uint64_t stream_id);
+
 // Returns true if the stream is complete: all incoming data was read (or
 // discarded) and all outgoing data, including fin, was acked by the peer (or
 // the send-side was reset). Also returns true if the stream doesn't exist.
