@@ -1873,6 +1873,19 @@ pub extern "C" fn quiche_conn_is_path_validated(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_conn_is_peer_address_verified(
+    conn: &Connection, from: &sockaddr, from_len: socklen_t, to: &sockaddr,
+    to_len: socklen_t,
+) -> c_int {
+    let from = std_addr_from_c(from, from_len);
+    let to = std_addr_from_c(to, to_len);
+    match conn.is_peer_address_verified(from, to) {
+        Ok(v) => v as c_int,
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_probe_path(
     conn: &mut Connection, local: &sockaddr, local_len: socklen_t,
     peer: &sockaddr, peer_len: socklen_t, seq: *mut u64,
