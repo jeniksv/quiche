@@ -6565,18 +6565,22 @@ impl<F: BufFactory> Connection<F> {
         Err(Error::InvalidStreamState(stream_id))
     }
 
-    /// Returns the next stream that has data to read.
+    /// Returns the next stream with data to read or a pending peer reset.
     ///
     /// Note that once returned by this method, a stream ID will not be returned
     /// again until it is "re-armed".
     ///
     /// The application will need to read all of the pending data on the stream,
     /// and new data has to be received before the stream is reported again.
+    /// A new peer reset also re-arms a stream unless its receive side was shut
+    /// down. After FIN has been read, [`stream_recv()`] still returns [`Done`].
     ///
     /// This is unlike the [`readable()`] method, that returns the same list of
     /// readable streams when called multiple times in succession.
     ///
     /// [`readable()`]: struct.Connection.html#method.readable
+    /// [`stream_recv()`]: struct.Connection.html#method.stream_recv
+    /// [`Done`]: enum.Error.html#variant.Done
     pub fn stream_readable_next(&mut self) -> Option<u64> {
         let priority_key = self.streams.readable.front().clone_pointer()?;
 
@@ -8701,7 +8705,6 @@ impl<F: BufFactory> Connection<F> {
                     Err(e) => return Err(e),
                 };
 
-                let was_readable = stream.is_readable();
                 let priority_key = Arc::clone(&stream.priority_key);
 
                 let was_reset = stream.recv.is_reset();
@@ -8720,7 +8723,9 @@ impl<F: BufFactory> Connection<F> {
                 let state = stream.state();
                 let local = stream.local;
 
-                if !was_readable && stream.is_readable() {
+                // A peer reset can interrupt application work even after the
+                // application took the notification for data or read FIN.
+                if !was_reset && !stream.recv.is_draining() {
                     self.streams.insert_readable(&priority_key);
                 }
 

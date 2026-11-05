@@ -471,8 +471,8 @@ ssize_t quiche_conn_stream_capacity(quiche_conn *conn, uint64_t stream_id);
 // Returns true if the stream has data that can be read.
 bool quiche_conn_stream_readable(const quiche_conn *conn, uint64_t stream_id);
 
-// Returns the next stream that has data to read, or -1 if no such stream is
-// available.
+// Returns the next stream with data to read or a pending peer reset
+// notification, or -1 when the queue is empty.
 int64_t quiche_conn_stream_readable_next(quiche_conn *conn);
 
 // Returns true if the stream has enough send capacity.

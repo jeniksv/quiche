@@ -190,9 +190,7 @@ pub struct StreamMap<F: BufFactory = DefaultBufFactory> {
     /// enough flow control credits to send at least some of that data.
     flushable: RBTree<StreamFlushablePriorityAdapter>,
 
-    /// Set of stream IDs corresponding to streams that have outstanding data
-    /// to read. This is used to generate a `StreamIter` of streams without
-    /// having to iterate over the full list of streams.
+    /// Streams with pending read or peer reset notifications.
     pub readable: RBTree<StreamReadablePriorityAdapter>,
 
     /// Set of streams queued for writable notification. A stopped stream can
@@ -695,7 +693,14 @@ impl<F: BufFactory> StreamMap<F> {
     /// Creates an iterator over streams that have outstanding data to read.
     pub fn readable(&self) -> StreamIter {
         StreamIter {
-            streams: self.readable.iter().map(|s| s.id).collect(),
+            streams: self
+                .readable
+                .iter()
+                .filter_map(|key| {
+                    let stream = self.get(key.id)?;
+                    stream.is_readable().then_some(key.id)
+                })
+                .collect(),
             index: 0,
         }
     }
