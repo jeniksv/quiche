@@ -6694,6 +6694,34 @@ impl<F: BufFactory> Connection<F> {
         stream.send.is_fin()
     }
 
+    /// Returns true if the specified stream is complete.
+    ///
+    /// For bidirectional streams this happens when all incoming data has been
+    /// read (or discarded) by the application, and when all outgoing data,
+    /// including the `fin` flag, has been acked by the peer (or the send-side
+    /// was reset). For unidirectional streams only the relevant direction is
+    /// checked, depending on whether the stream was created locally or not.
+    ///
+    /// Unlike [`stream_closed()`] and [`stream_send_finished()`], which only
+    /// require `fin` to be queued, this guarantees that the stream holds no
+    /// unsent or unacked data anymore.
+    ///
+    /// Returns true if the stream doesn't exist, including when it has
+    /// already been completed and collected.
+    ///
+    /// [`stream_closed()`]: struct.Connection.html#method.stream_closed
+    /// [`stream_send_finished()`]: struct.Connection.html#method.stream_send_finished
+    #[inline]
+    pub fn stream_complete(&self, stream_id: u64) -> bool {
+        let stream = match self.streams.get(stream_id) {
+            Some(v) => v,
+
+            None => return true,
+        };
+
+        stream.is_complete()
+    }
+
     /// Returns the number of bidirectional streams that can be created
     /// before the peer's stream count limit is reached.
     ///

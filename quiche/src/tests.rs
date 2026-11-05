@@ -1398,6 +1398,86 @@ fn stream_writable_next_stop_without_capacity(
     );
 }
 
+#[rstest]
+fn stream_complete_bidi(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    let mut buf = [0; 5];
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((5, true)));
+    assert!(!pipe.server.stream_complete(0));
+
+    // The response is queued with fin, so the stream is closed, but it is not
+    // complete until the peer acks it.
+    assert_eq!(pipe.server.stream_send(0, b"world", true), Ok(5));
+    assert!(pipe.server.stream_closed(0));
+    assert!(!pipe.server.stream_complete(0));
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(pipe.server.stream_complete(0));
+    assert_eq!(pipe.server.streams.len(), 0);
+}
+
+#[rstest]
+fn stream_complete_after_read_shutdown(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server responds before the end of the request, the response is acked.
+    assert_eq!(pipe.server.stream_send(0, b"world", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(!pipe.server.stream_complete(0));
+
+    // Server discards the rest of the request.
+    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 0), Ok(()));
+
+    // Client ends the request before it sees STOP_SENDING, the drained
+    // receive-side completes without the stream becoming readable.
+    assert_eq!(pipe.client.stream_send(0, b"", true), Ok(0));
+
+    let flight = test_utils::emit_flight(&mut pipe.client).unwrap();
+    assert_eq!(test_utils::process_flight(&mut pipe.server, flight), Ok(()));
+
+    assert!(pipe.server.stream_complete(0));
+}
+
+#[rstest]
+fn stream_complete_after_read_shutdown_and_reset(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server responds before the end of the request, the response is acked.
+    assert_eq!(pipe.server.stream_send(0, b"world", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+    assert!(!pipe.server.stream_complete(0));
+
+    // Server discards the rest of the request, the client answers the
+    // STOP_SENDING with RESET_STREAM.
+    assert_eq!(pipe.server.stream_shutdown(0, Shutdown::Read, 0), Ok(()));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(pipe.server.stream_complete(0));
+
+    // The drained stream completes without becoming readable.
+    assert_eq!(pipe.server.stream_readable_next(), None);
+}
+
 /// Test receiving into `BufMut`
 #[rstest]
 fn stream_recv_buf(
