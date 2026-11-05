@@ -1224,6 +1224,83 @@ fn stream_closed_uni(
     assert!(pipe.server.stream_closed(2));
 }
 
+#[rstest]
+/// Tests that a new RESET_STREAM is reported by stream_readable_next(), even if
+/// the stream was returned already and its data was not read.
+fn stream_readable_next_reset_unread(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", false), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    // Server takes the readable notification, but doesn't read the data.
+    assert_eq!(pipe.server.stream_readable_next(), Some(0));
+    assert_eq!(pipe.server.stream_readable_next(), None);
+
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 0,
+        error_code: 42,
+        final_size: 5,
+    }];
+
+    let pkt_type = Type::Short;
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+
+    // The reset is reported although the stream was readable already.
+    assert_eq!(pipe.server.stream_readable_next(), Some(0));
+    assert_eq!(pipe.server.stream_readable_next(), None);
+
+    assert_eq!(
+        pipe.server.stream_recv(0, &mut buf),
+        Err(Error::StreamReset(42))
+    );
+
+    // A retransmitted RESET_STREAM is not reported again.
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+    assert_eq!(pipe.server.stream_readable_next(), None);
+}
+
+#[rstest]
+/// Tests that a RESET_STREAM received after the whole stream was read is
+/// reported by stream_readable_next(), although there is nothing to read.
+fn stream_readable_next_reset_after_fin(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(pipe.server.stream_readable_next(), Some(0));
+    assert_eq!(pipe.server.stream_recv(0, &mut buf), Ok((5, true)));
+    assert_eq!(pipe.server.stream_readable_next(), None);
+
+    let frames = [frame::Frame::ResetStream {
+        stream_id: 0,
+        error_code: 42,
+        final_size: 5,
+    }];
+
+    let pkt_type = Type::Short;
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+
+    assert_eq!(pipe.server.stream_readable_next(), Some(0));
+    assert_eq!(pipe.server.stream_readable_next(), None);
+    assert!(pipe.server.streams.get(0).unwrap().recv.is_reset());
+
+    // A retransmitted RESET_STREAM is not reported again.
+    assert_eq!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf), Ok(39));
+    assert_eq!(pipe.server.stream_readable_next(), None);
+}
+
 /// Test receiving into `BufMut`
 #[rstest]
 fn stream_recv_buf(

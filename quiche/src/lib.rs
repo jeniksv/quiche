@@ -6458,6 +6458,8 @@ impl<F: BufFactory> Connection<F> {
     ///
     /// The application will need to read all of the pending data on the stream,
     /// and new data has to be received before the stream is reported again.
+    /// A stream reset by the peer is reported again, even if it has no data to
+    /// read, unless its receive-side was shut down.
     ///
     /// This is unlike the [`readable()`] method, that returns the same list of
     /// readable streams when called multiple times in succession.
@@ -8546,7 +8548,15 @@ impl<F: BufFactory> Connection<F> {
                     return Err(Error::FlowControl);
                 }
 
-                if !was_readable && stream.is_readable() {
+                // Report a new reset even if the stream was readable already
+                // (the application might have taken it from
+                // stream_readable_next() without reading all of its data), or
+                // if it doesn't become readable (its final size was received
+                // before). Unless the application shut the receive-side down
+                // and doesn't read the stream anymore.
+                let new_reset = !was_reset && !stream.recv.is_draining();
+
+                if new_reset || (!was_readable && stream.is_readable()) {
                     self.streams.insert_readable(&priority_key);
                 }
 
