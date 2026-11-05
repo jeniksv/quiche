@@ -1549,6 +1549,65 @@ fn stream_stopped(
     );
 }
 
+#[rstest]
+fn peer_address_verified(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+    assert_eq!(config.set_cc_algorithm_name(cc_algorithm_name), Ok(()));
+    config
+        .load_cert_chain_from_pem_file("examples/cert.crt")
+        .unwrap();
+    config
+        .load_priv_key_from_pem_file("examples/cert.key")
+        .unwrap();
+    config
+        .set_application_protos(&[b"proto1", b"proto2"])
+        .unwrap();
+    config.verify_peer(false);
+    config.set_active_connection_id_limit(2);
+
+    let mut pipe = pipe_with_exchanged_cids(&mut config, 16, 16, 1);
+
+    let server_addr = test_utils::Pipe::server_addr();
+    let client_addr = test_utils::Pipe::client_addr();
+    let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
+
+    // Verified by the Handshake packet.
+    assert_eq!(
+        pipe.server.is_peer_address_verified(server_addr, client_addr),
+        Ok(true)
+    );
+
+    // Unknown path.
+    assert_eq!(
+        pipe.server.is_peer_address_verified(server_addr, client_addr_2),
+        Err(Error::InvalidState)
+    );
+
+    // The client probes a new path, the server learns about it from the
+    // PATH_CHALLENGE and verifies it with its own PATH_CHALLENGE.
+    assert_eq!(pipe.client.probe_path(client_addr_2, server_addr), Ok(1));
+
+    test_utils::process_flight(
+        &mut pipe.server,
+        test_utils::emit_flight(&mut pipe.client).expect("no packet"),
+    )
+    .expect("error when processing client packets");
+
+    assert_eq!(
+        pipe.server.is_peer_address_verified(server_addr, client_addr_2),
+        Ok(false)
+    );
+
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert_eq!(
+        pipe.server.is_peer_address_verified(server_addr, client_addr_2),
+        Ok(true)
+    );
+}
+
 /// Test receiving into `BufMut`
 #[rstest]
 fn stream_recv_buf(
@@ -11745,6 +11804,13 @@ fn path_validation_limited_mtu(
         .unwrap();
     assert!(!pipe.client.paths.get(probed_pid).unwrap().validated(),);
     assert_eq!(pipe.client.path_event_next(), None);
+
+    // The peer address is verified, although the path is not validated.
+    assert_eq!(
+        pipe.client.is_peer_address_verified(client_addr_2, server_addr),
+        Ok(true)
+    );
+
     // Now let the client probe at its MTU.
     assert_eq!(pipe.advance(), Ok(()));
     assert!(pipe.client.paths.get(probed_pid).unwrap().validated());

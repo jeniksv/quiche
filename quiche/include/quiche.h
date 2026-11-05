@@ -1011,6 +1011,13 @@ void quiche_socket_addr_iter_free(quiche_socket_addr_iter *iter);
 // If the 4-tuple does not exist over the connection, returns an InvalidState.
 int quiche_conn_is_path_validated(const quiche_conn *conn, const struct sockaddr *from, size_t from_len, const struct sockaddr *to, size_t to_len);
 
+// Returns whether the peer's address on the network path with local address
+// "from" and remote address "to" has been verified (by a Retry token, a
+// Handshake packet or a PATH_RESPONSE), without waiting for the path MTU to be
+// validated. If the 4-tuple does not exist over the connection, returns an
+// InvalidState.
+int quiche_conn_is_peer_address_verified(const quiche_conn *conn, const struct sockaddr *from, size_t from_len, const struct sockaddr *to, size_t to_len);
+
 // Frees the connection object.
 void quiche_conn_free(quiche_conn *conn);
 

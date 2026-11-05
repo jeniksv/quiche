@@ -8011,6 +8011,30 @@ impl<F: BufFactory> Connection<F> {
         Ok(self.paths.get(pid)?.validated())
     }
 
+    /// Returns whether the peer's address on the network path with local
+    /// address `from` and remote address `to` has been verified.
+    ///
+    /// The address is verified once the peer proved that it receives packets
+    /// sent to it: by a Retry token, by a Handshake packet, or by a
+    /// PATH_RESPONSE frame. Unlike [`is_path_validated()`], this doesn't wait
+    /// for the path MTU to be validated.
+    ///
+    /// If the 4-tuple does not exist over the connection, returns an
+    /// [`InvalidState`].
+    ///
+    /// [`is_path_validated()`]: struct.Connection.html#method.is_path_validated
+    /// [`InvalidState`]: enum.Error.html#variant.InvalidState
+    pub fn is_peer_address_verified(
+        &self, from: SocketAddr, to: SocketAddr,
+    ) -> Result<bool> {
+        let pid = self
+            .paths
+            .path_id_from_addrs(&(from, to))
+            .ok_or(Error::InvalidState)?;
+
+        Ok(self.paths.get(pid)?.verified_peer_address)
+    }
+
     /// Returns true if the connection is draining.
     ///
     /// If this returns `true`, the connection object cannot yet be dropped, but
