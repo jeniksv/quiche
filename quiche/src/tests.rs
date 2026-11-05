@@ -1514,6 +1514,41 @@ fn stream_reset(
     );
 }
 
+#[rstest]
+/// Tests that stream_stopped() reports a stop without side effects.
+fn stream_stopped(
+    #[values("cubic", "bbr2_gcongestion")] cc_algorithm_name: &str,
+) {
+    let mut buf = [0; 65535];
+
+    let mut pipe = test_utils::Pipe::new(cc_algorithm_name).unwrap();
+    assert_eq!(pipe.handshake(), Ok(()));
+
+    assert!(!pipe.server.stream_stopped(0));
+
+    assert_eq!(pipe.client.stream_send(0, b"hello", true), Ok(5));
+    assert_eq!(pipe.advance(), Ok(()));
+
+    assert!(!pipe.server.stream_stopped(0));
+
+    let frames = [frame::Frame::StopSending {
+        stream_id: 0,
+        error_code: 42,
+    }];
+
+    let pkt_type = Type::Short;
+    assert!(pipe.send_pkt_to_server(pkt_type, &frames, &mut buf).is_ok());
+
+    assert!(pipe.server.stream_stopped(0));
+    assert!(pipe.server.stream_stopped(0));
+
+    // The stop is still reported to the writer.
+    assert_eq!(
+        pipe.server.stream_send(0, b"world", true),
+        Err(Error::StreamStopped(42))
+    );
+}
+
 /// Test receiving into `BufMut`
 #[rstest]
 fn stream_recv_buf(

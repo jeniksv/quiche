@@ -494,6 +494,11 @@ bool quiche_conn_stream_send_finished(const quiche_conn *conn, uint64_t stream_i
 // stream doesn't exist.
 bool quiche_conn_stream_reset(const quiche_conn *conn, uint64_t stream_id);
 
+// Returns true if the peer stopped the stream (STOP_SENDING). Unlike
+// quiche_conn_stream_send() it has no side effects. Returns false if the
+// stream doesn't exist.
+bool quiche_conn_stream_stopped(const quiche_conn *conn, uint64_t stream_id);
+
 // Returns true if the stream is complete: all incoming data was read (or
 // discarded) and all outgoing data, including fin, was acked by the peer (or
 // the send-side was reset). Also returns true if the stream doesn't exist.

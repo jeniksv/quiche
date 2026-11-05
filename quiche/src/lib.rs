@@ -6714,6 +6714,27 @@ impl<F: BufFactory> Connection<F> {
         }
     }
 
+    /// Returns true if the peer stopped the specified stream (`STOP_SENDING`).
+    ///
+    /// Unlike [`stream_send()`] or [`stream_capacity()`], which report the stop
+    /// as an error, this has no side effects, so it can be used to check a
+    /// stream returned by [`stream_writable_next()`] before handing it over to
+    /// code that writes the stream on its own schedule.
+    ///
+    /// Returns false if the stream doesn't exist.
+    ///
+    /// [`stream_send()`]: struct.Connection.html#method.stream_send
+    /// [`stream_capacity()`]: struct.Connection.html#method.stream_capacity
+    /// [`stream_writable_next()`]: struct.Connection.html#method.stream_writable_next
+    #[inline]
+    pub fn stream_stopped(&self, stream_id: u64) -> bool {
+        match self.streams.get(stream_id) {
+            Some(stream) => stream.send.is_stopped(),
+
+            None => false,
+        }
+    }
+
     /// Returns true if the specified stream is complete.
     ///
     /// For bidirectional streams this happens when all incoming data has been
